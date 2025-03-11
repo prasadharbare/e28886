@@ -197,12 +197,12 @@ header h3 {
   border-bottom: 0;
 }
 
-header > *:first-child {
+header>*:first-child {
   margin-top: 0;
   padding-top: 0;
 }
 
-header > *:last-child {
+header>*:last-child {
   margin-bottom: 0;
 }
 
@@ -327,7 +327,7 @@ details[open] summary {
   margin-bottom: 6px;
 }
 
-details[open] > *:last-child {
+details[open]>*:last-child {
   /* Resets the bottom margin of the last element in the <details> while <details> is opened. This prevents double margins/paddings. */
   margin-bottom: 0;
 }
@@ -429,4 +429,14 @@ input {
 
 img {
   max-width: 100%;
+}
+
+mark {
+  background: red;
+  color: white;
+}
+
+.editor {
+  width: 100%;
+  height: 15rem;
 }
