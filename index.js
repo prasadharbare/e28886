@@ -5,6 +5,7 @@ const express = require("express");
 const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
+const sanitizeHTML = require("sanitize-html");
 
 const db = require("better-sqlite3")("database.db");
 db.pragma("journal_mode = WAL"); // Performance
@@ -39,18 +40,21 @@ app.use(function (req, res, next) {
 
   try {
     const decoded = jwt.verify(req.cookies.user, process.env.JWTSECRET);
-    req.user = decoded.user; // give access to every route
+
+    const { userId, username } = decoded;
+
+    req.user = { userId, username }; // give access to every route
   } catch (err) {
     req.user = false;
   }
 
   res.locals.user = req.user; // access from templates
-  console.log(req.user);
 
   next();
 });
 
 // MARK: Routes
+// --- Home
 app.get("/", (req, res) => {
   if (req.user) {
     // TODO: Show research papers on dashboard
@@ -60,10 +64,7 @@ app.get("/", (req, res) => {
   return res.render("homepage");
 });
 
-app.get("/login", (req, res) => {
-  res.render("login");
-});
-
+// --- Register
 app.post("/register", (req, res) => {
   let { username, password } = req.body;
   const errors = [];
@@ -127,7 +128,11 @@ app.post("/register", (req, res) => {
 
   // Send back a JWT token
   const tokenValue = jwt.sign(
-    { user: ourUser.id, exp: Date.now() / 1000 + 60 * 60 * 24 },
+    {
+      userId: ourUser.id,
+      username: username,
+      exp: Date.now() / 1000 + 60 * 60 * 24,
+    },
     process.env.JWTSECRET
   );
 
@@ -142,11 +147,14 @@ app.post("/register", (req, res) => {
   res.send(`User registration complete: ${username}`);
 });
 
-// TODO: Add login functionality
+// --- Login
+app.get("/login", (req, res) => {
+  res.render("login");
+});
+
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
-
-  const errors = [];
+  let errors = [];
 
   if (typeof username !== "string") username = "";
   if (typeof password !== "string") password = "";
@@ -159,28 +167,103 @@ app.post("/login", (req, res) => {
     return res.render("login", { errors });
   }
 
+  // Check for user in database
   const userInDBStatement = db.prepare(
     `SELECT * FROM users WHERE USERNAME = ?`
   );
-  const userInDB = query.get(userInDBStatement);
 
-  console.log(userInDB);
+  const userInDB = userInDBStatement.get(username);
 
   if (!userInDB) {
-    return res.render("login", { errors: ["User not found"] });
+    errors = ["User not found"];
+    return res.render("login", { errors });
   }
 
   // Check password comparison
-  const passwordCheck = bcrypt.compare(password, userInDB.password);
+  const passwordCheck = bcrypt.compareSync(password, userInDB.password);
   if (!passwordCheck) {
-    return res.render("login", { errors: ["Invalid username/password"] });
+    errors = ["Invalid username/password"];
+
+    return res.render("login", { errors });
   }
 
-  // TODO: Send a JWT Token
+  // Send back a JWT token
+  const tokenValue = jwt.sign(
+    {
+      userId: userInDB.id,
+      username: username,
+      exp: Date.now() / 1000 + 60 * 60 * 24,
+    },
+    process.env.JWTSECRET
+  );
+
+  // Send a cookie back to the client
+  res.cookie("user", tokenValue, {
+    httpOnly: true, // Only for server
+    secure: true, // Runs on only https connection
+    sameSite: "strict", // CSRF Attacks but not for subdomains
+    maxAge: 1000 * 60 * 60 * 24, // Valid for a week
+  });
 
   return res.redirect("/");
 });
 
+// Logout
+app.get("/logout", (req, res) => {
+  res.clearCookie("user");
+  return res.redirect("/");
+});
+
+// --- Paper
+function mustBeLoggedIn(req, res, next) {
+  // comes from global middleware
+  if (req.user) {
+    next();
+  }
+
+  return res.redirect("/");
+}
+
+// Paper html validtion
+function postValidation(req) {
+  let errors = [];
+
+  if (typeof req.body.title !== "string") req.body.title = "";
+  if (typeof req.body.body !== "string") req.body.body = "";
+
+  // Clean HTML Part
+  req.body.title = sanitizeHTML(req.body.title, {
+    allowedTags: ["b", "i", "em", "strong", "a", "p"],
+    allowedAttributes: {
+      a: ["href"],
+    },
+  });
+  req.body.body = sanitizeHTML(req.body.body, {
+    allowedTags: ["b", "i", "em", "strong", "a", "p"],
+    allowedAttributes: {
+      a: ["href"],
+    },
+  });
+
+  if (!req.body.title) errors.push("Title must not be empty");
+  if (!req.body.body) errors.push("Body must not be empty");
+
+  return errors;
+}
+
+app.get("/create-paper", mustBeLoggedIn, (req, res) => {
+  return res.render("create-paper");
+});
+
+app.post("/create-paper", mustBeLoggedIn, (req, res) => {
+  // we will get title and body from the post request
+  const errors = postValidation(req);
+
+  console.log(req.body);
+
+  res.send("OK");
+});
+
 app.listen(PORT, () => {
-  console.log("Server fired up 🔥");
+  console.log(`Server fired up 🔥 on PORT ${PORT}`);
 });
